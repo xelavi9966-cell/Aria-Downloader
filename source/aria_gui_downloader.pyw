@@ -2,16 +2,34 @@ import os
 import sys
 import re
 import json
+import time
 import threading
 import subprocess
 import tkinter as tk
+from urllib.parse import urlparse, parse_qs
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
+import requests
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 class AriaDownloaderApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Aria2 Downloader")
+
+        try:
+            icon_path = resource_path("app_icon.ico")
+            self.root.iconbitmap(icon_path)
+        except Exception as e:
+            print("Icon load error:", e)
+
         self.root.geometry("980x760")
         self.root.minsize(900, 650)
 
@@ -35,6 +53,11 @@ class AriaDownloaderApp:
         self.url_var = tk.StringVar()
         self.dir_var = tk.StringVar()
         self.filename_var = tk.StringVar()
+
+        # civitai download
+        self.civitai_mode_var = tk.BooleanVar(value=False)
+        self.civitai_api_var = tk.StringVar()
+        # ----------------
 
         self.progress_var = tk.DoubleVar(value=0.0)
         self.status_var = tk.StringVar(value="Done")
@@ -69,6 +92,24 @@ class AriaDownloaderApp:
         tk.Label(top, text="File name:").grid(row=2, column=0, sticky="w")
         self.filename_entry = tk.Entry(top, textvariable=self.filename_var, width=95)
         self.filename_entry.grid(row=2, column=1, padx=5, pady=5, sticky="we")
+
+        self.civitai_mode_check = tk.Checkbutton(
+            top,
+            text="Civitai download (API)",
+            variable=self.civitai_mode_var,
+            command=self.save_config
+        )
+        self.civitai_mode_check.grid(row=3, column=0, sticky="w")
+
+        self.civitai_api_entry = tk.Entry(
+            top,
+            textvariable=self.civitai_api_var,
+            width=95,
+            show="*"
+        )
+        self.civitai_api_entry.grid(row=3, column=1, padx=5, pady=5, sticky="we")
+        self.civitai_api_entry.bind("<FocusOut>", lambda e: self.save_config())
+        self.civitai_api_entry.bind("<Return>", lambda e: self.save_config())
 
         top.grid_columnconfigure(1, weight=1)
 
@@ -178,8 +219,254 @@ class AriaDownloaderApp:
         if candidate and "." in candidate and len(candidate) < 200:
             self.filename_var.set(candidate)
 
+        # Civitai download
+    def is_civitai_url(self, url):
+        if not url:
+            return False
+        host = urlparse(url).netloc.lower()
+        return "civitai.com" in host
+
+    def extract_civitai_version_id(self, url):
+        parsed = urlparse(url)
+        path = parsed.path.strip("/")
+        query = parse_qs(parsed.query)
+
+        m = re.search(r'/api/download/models/(\d+)', parsed.path)
+        if m:
+            return m.group(1)
+
+        if "modelVersionId" in query and query["modelVersionId"]:
+            return query["modelVersionId"][0]
+
+        return None
+
+    def get_civitai_download_info(self, url, api_key):
+        version_id = self.extract_civitai_version_id(url)
+        if not version_id:
+            raise Exception(
+                "Could not determine modelVersionId from the Civitai link.\n"
+                "Use a link containing ?modelVersionId=... or a direct /api/download/models/... link."
+            )
+
+        api_url = f"https://civitai.com/api/v1/model-versions/{version_id}"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "Aria2-Downloader/1.0"
+        }
+
+        resp = requests.get(api_url, headers=headers, timeout=30)
+        if resp.status_code != 200:
+            raise Exception(f"Civitai API returned status {resp.status_code} for model version request.")
+
+        data = resp.json()
+
+        files = data.get("files", [])
+        if not files:
+            raise Exception("No downloadable files were found in this Civitai model version.")
+
+        selected_file = None
+        for f in files:
+            if f.get("downloadUrl"):
+                selected_file = f
+                break
+
+        if not selected_file:
+            raise Exception("Could not find downloadUrl in Civitai API response.")
+
+        download_url = selected_file.get("downloadUrl")
+        filename = selected_file.get("name") or ""
+
+        return {
+            "download_url": download_url,
+            "filename": filename,
+            "version_id": version_id
+        }
+
+    def start_civitai_download(self):
+        if self.is_running:
+            return
+
+        url = self.url_var.get().strip()
+        out_dir = self.dir_var.get().strip()
+        api_key = self.civitai_api_var.get().strip()
+        filename = self.filename_var.get().strip()
+
+        if not url:
+            messagebox.showwarning("Attention", "Insert a Civitai link.")
+            return
+
+        if not out_dir:
+            messagebox.showwarning("Attention", "Select a folder to download.")
+            return
+
+        if not os.path.isdir(out_dir):
+            messagebox.showerror("Error", f"The folder does not exist:\n{out_dir}")
+            return
+
+        if not api_key:
+            messagebox.showwarning("Attention", "Enter the Civitai API key.")
+            return
+
+        try:
+            info = self.get_civitai_download_info(url, api_key)
+
+            if not filename:
+                filename = info["filename"]
+                if filename:
+                    self.filename_var.set(filename)
+
+            self.save_config()
+
+            self.continue_button.config(state="disabled")
+            self.progress_var.set(0)
+            self.status_var.set("Start Civitai download...")
+            self.speed_var.set("Speed: —")
+            self.percent_var.set("0%")
+            self.size_var.set("Size: —")
+            self.eta_var.set("Remains: —")
+
+            thread = threading.Thread(
+                target=self._civitai_worker,
+                args=(info["download_url"], out_dir, filename or info["filename"], api_key),
+                daemon=True
+            )
+            self.is_running = True
+            self.start_button.config(state="disabled")
+            self.stop_button.config(state="normal")
+            self.continue_button.config(state="disabled")
+
+            self.log("=" * 100)
+            self.log("Launching Civitai Python download mode")
+            self.log(f"Civitai version ID: {info['version_id']}")
+            self.log(f"Resolved file: {filename or info['filename']}")
+            self.log("=" * 100)
+
+            thread.start()
+
+        except Exception as e:
+            messagebox.showerror("Civitai error", str(e))
+            self.log(f"❌ Civitai preparation error: {e}")
+
+    def _civitai_worker(self, download_url, out_dir, filename, api_key):
+        try:
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "Aria2-Downloader/1.0"
+            }
+
+            with requests.get(download_url, headers=headers, stream=True, allow_redirects=True, timeout=60) as resp:
+                if resp.status_code != 200:
+                    raise Exception(f"Download request failed with status {resp.status_code}")
+
+                total = int(resp.headers.get("Content-Length", 0))
+                final_name = filename.strip() if filename else ""
+
+                if not final_name:
+                    cd = resp.headers.get("Content-Disposition", "")
+                    m = re.search(r'filename="?([^"]+)"?', cd)
+                    if m:
+                        final_name = m.group(1)
+                    else:
+                        final_name = "civitai_download.bin"
+
+                save_path = os.path.join(out_dir, final_name)
+
+                downloaded = 0
+                chunk_size = 1024 * 256
+                start_time = time.time()
+                last_ui_update = 0
+
+                self.root.after(0, lambda: self.status_var.set("Loading is underway..."))
+                self.root.after(0, lambda: self.root.title("Aria2 Downloader — Civitai mode"))
+
+                with open(save_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=chunk_size):
+                        if not self.is_running:
+                            raise Exception("Download stopped by user.")
+
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+
+                            now = time.time()
+                            elapsed = max(now - start_time, 0.001)
+                            speed_bps = downloaded / elapsed
+                            speed_text = f"{self._format_bytes(speed_bps)}/s"
+
+                            if total > 0:
+                                percent = int(downloaded * 100 / total)
+                                size_text = f"{self._format_bytes(downloaded)} / {self._format_bytes(total)}"
+
+                                remaining_bytes = max(total - downloaded, 0)
+                                if speed_bps > 0:
+                                    eta_seconds = remaining_bytes / speed_bps
+                                    eta_text = self._format_eta(eta_seconds)
+                                else:
+                                    eta_text = "—"
+                            else:
+                                percent = 0
+                                size_text = self._format_bytes(downloaded)
+                                eta_text = "—"
+
+                            # Чтобы UI не обновлялся слишком часто
+                            if now - last_ui_update >= 0.2 or (total > 0 and downloaded >= total):
+                                last_ui_update = now
+                                self.root.after(
+                                    0,
+                                    self.update_progress_ui,
+                                    percent,
+                                    size_text,
+                                    speed_text,
+                                    eta_text
+                                )
+
+                self.root.after(0, self.log, f"✅ Download completed successfully: {final_name}")
+                self.root.after(0, lambda: self.status_var.set("The download is complete"))
+                self.root.after(0, lambda: self.progress_var.set(100))
+                self.root.after(0, lambda: self.percent_var.set("100%"))
+                self.root.after(0, lambda: self.eta_var.set("Remains: 0 sec"))
+                self.root.after(0, lambda: self.continue_button.config(state="disabled"))
+                self.root.after(0, lambda: self.root.title("Aria2 Downloader — Done"))
+
+        except Exception as e:
+            self.root.after(0, self.log, f"❌ Civitai download error: {e}")
+            self.root.after(0, lambda: self.status_var.set("Loading aborted"))
+            self.root.after(0, lambda: self.continue_button.config(state="disabled"))
+            self.root.after(0, lambda: self.root.title("Aria2 Downloader — Error"))
+
+        finally:
+            self.is_running = False
+            self.process = None
+            self.root.after(0, lambda: self.start_button.config(state="normal"))
+            self.root.after(0, lambda: self.stop_button.config(state="disabled"))
+
+    def _format_bytes(self, num):
+        step_unit = 1024.0
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if num < step_unit:
+                if unit == "B":
+                    return f"{int(num)}{unit}"
+                return f"{num:.2f}{unit}"
+            num /= step_unit
+        return f"{num:.2f}PB"
+    
+    def _format_eta(self, seconds):
+        seconds = int(max(0, seconds))
+
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+
+        if h > 0:
+            return f"{h}h {m}m {s}s"
+        if m > 0:
+            return f"{m}m {s}s"
+        return f"{s}s"
+        #-----------------
+
     def build_command(self, resume=False):
         url = self.url_var.get().strip()
+
         out_dir = self.dir_var.get().strip()
         filename = self.filename_var.get().strip()
 
@@ -190,7 +477,7 @@ class AriaDownloaderApp:
         if not out_dir:
             messagebox.showwarning("Attention", "Select a folder to download.")
             return None
-
+        
         if not os.path.exists(self.aria_path):
             messagebox.showerror("Error", f"Not found aria2c.exe:\n{self.aria_path}")
             return None
@@ -222,6 +509,12 @@ class AriaDownloaderApp:
 
     def start_download(self):
         if self.is_running:
+            return
+
+        url = self.url_var.get().strip()
+
+        if self.civitai_mode_var.get() and self.is_civitai_url(url):
+            self.start_civitai_download()
             return
 
         self.auto_fill_filename_from_url()
@@ -256,12 +549,18 @@ class AriaDownloaderApp:
         self.run_process(cmd)
 
     def stop_download(self):
-        if self.process and self.is_running:
+        if not self.is_running:
+            return
+
+        if self.process:
             try:
                 self.process.terminate()
-                self.log("⏹ Upload stopped by user.")
+                self.log("⏹ Download stopped by user.")
             except Exception as e:
                 self.log(f"Stop error: {e}")
+        else:
+            self.is_running = False
+            self.log("⏹ Download stopped by user.")
 
     def run_process(self, cmd):
         self.is_running = True
@@ -386,16 +685,18 @@ class AriaDownloaderApp:
             self.root.after(0, lambda: self.stop_button.config(state="disabled"))
 
     def save_config(self):
-        data = {
-            "last_url": self.url_var.get().strip(),
-            "last_dir": self.dir_var.get().strip(),
-            "last_filename": self.filename_var.get().strip(),
-        }
         try:
+            data = {
+                "last_url": self.url_var.get().strip(),
+                "last_dir": self.dir_var.get().strip(),
+                "last_filename": self.filename_var.get().strip(),
+                "civitai_mode": self.civitai_mode_var.get(),
+                "civitai_api_key": self.civitai_api_var.get().strip(),
+            }
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Config save error: {e}")
 
     def load_config(self):
         if not os.path.exists(self.config_path):
@@ -406,8 +707,10 @@ class AriaDownloaderApp:
             self.url_var.set(data.get("last_url", ""))
             self.dir_var.set(data.get("last_dir", ""))
             self.filename_var.set(data.get("last_filename", ""))
-        except Exception:
-            pass
+            self.civitai_mode_var.set(data.get("civitai_mode", False))
+            self.civitai_api_var.set(data.get("civitai_api_key", ""))
+        except Exception as e:
+            self.log(f"Config load error: {e}")
 
 
 def main():

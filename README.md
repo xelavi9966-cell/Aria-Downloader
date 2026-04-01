@@ -1,97 +1,134 @@
 # 🚀 Aria Downloader GUI
 
-A simple and reliable Windows GUI for downloading large files using **aria2c** with resume support.
+A fast and reliable Windows GUI for downloading large files using **aria2c** with full resume support.
 
-Designed especially for downloading models and assets from platforms like **HuggingFace**, **GitHub Releases**, and other direct links — without dealing with broken browser downloads.
+Designed for stable downloads from platforms like **HuggingFace**, **GitHub Releases**, and other direct sources — without broken browser downloads.
+
+---
+
+## 🔽 Download
+
+👉 Get the latest version here:  
+https://github.com/xelavi9966-cell/Aria-Downloader/releases
+
+Download `.zip`, extract and run:
+
+Aria Downloader.exe
+
 
 ---
 
 ## ✨ Features
 
-* ✅ Download via direct HTTP/HTTPS links
-* 🔄 Resume downloads after connection loss
-* 📊 Real-time progress display
-* ⚡ Download speed indicator
-* ⏱ ETA (estimated time remaining)
-* 📁 Custom download folder selection
-* 📝 Custom file name support
-* 🖱 Drag & Drop URL support *(optional / if implemented)*
-* 🧠 Auto-detect file name from URL
-* 🪟 Clean GUI (no console window)
-* 📦 Portable `.exe` version — no Python required
+- 📥 Download via direct HTTP/HTTPS links
+- 🔄 Resume downloads after connection loss
+- 📊 Real-time progress tracking
+- ⚡ Speed monitoring
+- ⏱ ETA (estimated time remaining)
+- 📁 Custom download folder selection
+- 📝 Custom file name support
+- 🧠 Auto-detect file name from URL
+- 🪟 Clean GUI (no console window)
+- 📦 Portable `.exe` — no Python required
 
 ---
 
-## 📥 Download
+## 🖥 Interface
 
-👉 Go to the **Releases** section:
-https://github.com/xelavi9966-cell/Aria-Downloader/releases
-
-Download the latest `.zip` archive:
-
-* Extract it
-* Run `Aria Downloader.exe`
+- URL input field
+- Folder selection
+- File name override
+- Start / Continue buttons
+- Progress bar + speed + ETA
 
 ---
 
 ## 🧑‍💻 How to Use
 
 1. Paste or drag a direct download link
-2. Select a destination folder
-3. (Optional) Set a custom file name
+2. Select destination folder
+3. (Optional) Set custom file name
 4. Click **Start**
-5. If download fails — click **Continue**
+5. If interrupted — click **Continue**
 
 ---
 
 ## ⚠️ Important Notes
 
-* Use **direct links only**
+### Supported:
+- ✔ HuggingFace (`resolve/...`)
+- ✔ GitHub Releases
+- ✔ Direct file URLs
 
-  * ✔ Works: HuggingFace (`resolve/...`), GitHub Releases
-  * ❌ Doesn't work: Google Drive, Mega, Yandex Disk
+### Not supported:
+- ❌ Google Drive
+- ❌ Mega
 
-* If `Ctrl+V` doesn't work:
+## 🎯 Civitai Support
 
-  * Switch to **English keyboard layout**
-  * Or use **Shift+Insert**
+You can download files directly from **Civitai** without using a browser.
+
+### How it works:
+- Paste a direct download link from Civitai
+- The app handles stable downloading via aria2c
+- Supports large model files without breaking
+
+### Recommended:
+- Use "Download" links from model pages
+- Ensure the link is a direct file URL
+
+This makes it especially useful for:
+- LoRA training datasets
+- Checkpoints
+- ControlNet / SDXL assets
 
 ---
 
-## 🛠️ Build from Source
+### Keyboard issues (Windows)
+
+If `Ctrl+V` doesn't work:
+
+- Switch to **English layout**
+- Or use **Shift + Insert**
+
+---
+
+## 🧠 Why not browser downloads?
+
+Browsers often:
+- break large downloads
+- don't resume properly
+- lose progress
+
+This tool uses **aria2c**, which provides:
+- multi-thread downloading
+- stable resume
+- higher speed
+
+---
+
+## 🛠 Build from Source
 
 ### Requirements
 
-* Python 3.10+
-* `aria2c.exe`
+- Python 3.10+
+- aria2c.exe
 
 ---
 
-### Install dependencies
+### Install
 
 ```bash
 pip install pyinstaller
+pyinstaller --noconfirm --onefile --windowed \
+--name "Aria Downloader" \
+--icon "assets/app_icon.ico" \
+--add-binary "aria2c.exe;." \
+aria_gui_downloader.pyw
 ```
-
----
-
-### Build executable
-
-```bash
-pyinstaller --noconfirm --onefile --windowed --name "Aria Downloader" --icon "app_icon.ico" --add-binary "aria2c.exe;." aria_gui_downloader.pyw
-```
-
-Output will be in:
-
-```
-dist/Aria Downloader.exe
-```
-
----
 
 ## 📁 Project Structure
 
-```
 Aria-Downloader/
 ├─ source/
 │  └─ aria_gui_downloader.pyw
@@ -100,51 +137,11 @@ Aria-Downloader/
 │  └─ screenshots/
 ├─ README.md
 ├─ LICENSE
-```
-
----
-
-## 🧠 How It Works
-
-This application is a graphical interface for:
-
-👉 **aria2c**
-
-It provides:
-
-* stable multi-part downloads
-* automatic resume
-* better performance than browsers
-
----
-
-## 📌 Future Improvements
-
-* ⏳ Download queue
-* 🌐 Cookie support for restricted downloads
-* 🧲 Torrent / magnet support
-* 📄 Batch download from `.txt`
-* 🎨 UI improvements
-
----
 
 ## 📜 License
 
-This project is licensed under the MIT License.
-
----
+MIT License
 
 ## ❤️ Credits
-
-* aria2 — https://aria2.github.io
-* Built with Python + tkinter
-
----
-
-## 👤 Author
-
-Created by **Xelavi**
-
----
-
-If you find this project useful — ⭐ star the repo!
+aria2 — https://aria2.github.io
+Built with Python + tkinter
